@@ -1,0 +1,176 @@
+blueprint:
+  name: IKEA BILRESA (Matter) Dual Button → 2 Lights + Adaptive + Long Press Override
+  description: >
+    Single press toggles each light and applies Adaptive Lighting.
+    Long press (~3s) forces full-power neutral white.
+    Designed specifically for IKEA BILRESA dual-button Matter remote (806.178.76).
+  domain: automation
+
+  input:
+    button_a_event:
+      name: Button A event entity
+      selector:
+        entity:
+          domain: event
+
+    button_b_event:
+      name: Button B event entity
+      selector:
+        entity:
+          domain: event
+
+    light_a:
+      name: Light A (Button A)
+      selector:
+        entity:
+          domain: light
+
+    light_b:
+      name: Light B (Button B)
+      selector:
+        entity:
+          domain: light
+
+    adaptive_switch:
+      name: Adaptive Lighting switch
+      selector:
+        entity:
+          domain: switch
+
+    full_white_kelvin:
+      name: Full white color temperature
+      description: Kelvin used for long press override
+      default: 4000
+      selector:
+        number:
+          min: 2700
+          max: 6500
+          step: 100
+          unit_of_measurement: K
+
+mode: restart
+
+trigger:
+  - platform: state
+    entity_id: !input button_a_event
+    id: button_a
+    not_from: [unknown, unavailable]
+
+  - platform: state
+    entity_id: !input button_b_event
+    id: button_b
+    not_from: [unknown, unavailable]
+
+variables:
+  light_a: !input light_a
+  light_b: !input light_b
+  adaptive: !input adaptive_switch
+  kelvin: !input full_white_kelvin
+
+  etype: "{{ state_attr(trigger.entity_id, 'event_type') | default('') }}"
+
+  # Common Matter event_type values across controllers
+  single_press:
+    - press
+    - pressed
+    - short_press
+    - short_release
+    - multi_press_1
+
+  long_press:
+    - long_press
+    - long_release
+    - hold
+    - held
+    - multi_press_2
+
+action:
+  - choose:
+
+      # ───────── Button A ─────────
+      - conditions:
+          - condition: trigger
+            id: button_a
+
+        sequence:
+          - choose:
+
+              # Long press → full power white
+              - conditions: "{{ etype in long_press }}"
+                sequence:
+                  - service: adaptive_lighting.set_manual_control
+                    data:
+                      entity_id: "{{ adaptive }}"
+                      lights: ["{{ light_a }}"]
+                      manual_control: true
+                  - service: light.turn_on
+                    target:
+                      entity_id: "{{ light_a }}"
+                    data:
+                      brightness: 255
+                      color_temp_kelvin: "{{ kelvin }}"
+
+              # Single press → toggle w/ Adaptive Lighting
+              - conditions: "{{ etype in single_press or etype == '' }}"
+                sequence:
+                  - choose:
+                      - conditions: "{{ is_state(light_a, 'on') }}"
+                        sequence:
+                          - service: light.turn_off
+                            target:
+                              entity_id: "{{ light_a }}"
+                    default:
+                      - service: adaptive_lighting.set_manual_control
+                        data:
+                          entity_id: "{{ adaptive }}"
+                          lights: ["{{ light_a }}"]
+                          manual_control: false
+                      - service: adaptive_lighting.apply
+                        data:
+                          entity_id: "{{ adaptive }}"
+                          lights: ["{{ light_a }}"]
+                          turn_on_lights: true
+
+      # ───────── Button B ─────────
+      - conditions:
+          - condition: trigger
+            id: button_b
+
+        sequence:
+          - choose:
+
+              # Long press → full power white
+              - conditions: "{{ etype in long_press }}"
+                sequence:
+                  - service: adaptive_lighting.set_manual_control
+                    data:
+                      entity_id: "{{ adaptive }}"
+                      lights: ["{{ light_b }}"]
+                      manual_control: true
+                  - service: light.turn_on
+                    target:
+                      entity_id: "{{ light_b }}"
+                    data:
+                      brightness: 255
+                      color_temp_kelvin: "{{ kelvin }}"
+
+              # Single press → toggle w/ Adaptive Lighting
+              - conditions: "{{ etype in single_press or etype == '' }}"
+                sequence:
+                  - choose:
+                      - conditions: "{{ is_state(light_b, 'on') }}"
+                        sequence:
+                          - service: light.turn_off
+                            target:
+                              entity_id: "{{ light_b }}"
+                    default:
+                      - service: adaptive_lighting.set_manual_control
+                        data:
+                          entity_id: "{{ adaptive }}"
+                          lights: ["{{ light_b }}"]
+                          manual_control: false
+                      - service: adaptive_lighting.apply
+                        data:
+                          entity_id: "{{ adaptive }}"
+                          lights: ["{{ light_b }}"]
+                          turn_on_lights: true
