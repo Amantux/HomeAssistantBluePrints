@@ -1,5 +1,5 @@
 blueprint:
-  name: "IKEA BILRESA (Matter) Dual Button -> 2 Lights (Option A: Turn On then Adaptive Apply) + Long-Press Full White Toggle"
+  name: "IKEA BILRESA Matter Dual Button - 2 Lights - Option A Turn On Then Adaptive Apply - Long Press Full White Toggle"
   description: >
     Option A to reduce flicker: on single-press ON, turn the light on without attributes first,
     then apply Adaptive Lighting (optionally after a small delay). Long press toggles full white <-> adaptive.
