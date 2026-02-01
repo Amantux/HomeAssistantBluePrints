@@ -1,331 +1,241 @@
 blueprint:
-  name: IKEA BILRESA (Matter) Dual Button → 2 Lights (Adaptive) + Long-Press Full White Toggle (Updated)
-  description: |
-    Updated behavior:
-      - Pressed once (multi_press_1): run your configured action (defaults to toggle light)
-      - Held down (long_press): Full White toggle
-      - Released after held (long_release): Full White toggle
-      - While holding loop interval adjustable in 0.25s increments
-
-    Notes:
-      - Matter BILRESA exposes an event.* entity; press type is in attributes.event_type
-        (multi_press_1, multi_press_2, long_press, long_release). :contentReference[oaicite:1]{index=1}
+  name: IKEA BILRESA (Matter) Dual Button → 2 Lights + Hold/Release White Mode Toggle
+  description: >
+    Press once toggles light on/off.
+    Long press toggles white mode after an adjustable delay (0.25s steps).
+    Long release toggles white mode only if hold-delay toggle did not already fire.
   domain: automation
 
   input:
-    setup:
-      name: ⚙️ Remote Setup
-      collapsed: true
-      input:
-        button1_event:
-          name: Button 1 event entity
-          selector:
-            entity:
-              filter:
-                integration: matter
-                domain: event
-                device_class: button
-        button2_event:
-          name: Button 2 event entity
-          selector:
-            entity:
-              filter:
-                integration: matter
-                domain: event
-                device_class: button
+    button1_event:
+      name: Button 1 event entity
+      selector:
+        entity:
+          filter:
+            integration: matter
+            domain: event
+            device_class: button
+    button2_event:
+      name: Button 2 event entity
+      selector:
+        entity:
+          filter:
+            integration: matter
+            domain: event
+            device_class: button
 
-    targets:
-      name: 💡 Target Lights
-      collapsed: true
-      input:
-        light_1:
-          name: Light for Button 1
-          selector:
-            entity:
-              filter:
-                domain: light
-        light_2:
-          name: Light for Button 2
-          selector:
-            entity:
-              filter:
-                domain: light
+    light_1:
+      name: Light for Button 1
+      selector:
+        entity:
+          filter:
+            domain: light
+    light_2:
+      name: Light for Button 2
+      selector:
+        entity:
+          filter:
+            domain: light
 
-        adaptive_switch_1:
-          name: Adaptive switch for Light 1 (optional)
-          description: "If provided, Full White will toggle this switch OFF; toggling back ON restores adaptive behavior."
-          default: ""
-          selector:
-            entity:
-              filter:
-                domain: switch
+    # "White mode" is usually "Adaptive Lighting OFF" + force a white scene.
+    adaptive_switch_1:
+      name: Adaptive switch for Light 1 (optional, recommended for true "toggle white mode")
+      default: ""
+      selector:
+        entity:
+          filter:
+            domain: switch
+    adaptive_switch_2:
+      name: Adaptive switch for Light 2 (optional, recommended for true "toggle white mode")
+      default: ""
+      selector:
+        entity:
+          filter:
+            domain: switch
 
-        adaptive_switch_2:
-          name: Adaptive switch for Light 2 (optional)
-          default: ""
-          selector:
-            entity:
-              filter:
-                domain: switch
+    full_white_kelvin:
+      name: Full white color temp (K)
+      default: 6500
+      selector:
+        number:
+          min: 2000
+          max: 6500
+          step: 50
+          mode: slider
+    full_white_brightness_pct:
+      name: Full white brightness (%)
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          mode: slider
 
-    white_settings:
-      name: 🎨 Full White Settings
-      collapsed: true
-      input:
-        full_white_kelvin:
-          name: Full White color temperature (K)
-          default: 6500
-          selector:
-            number:
-              min: 2000
-              max: 6500
-              step: 50
-              mode: slider
-        full_white_brightness_pct:
-          name: Full White brightness (%)
-          default: 100
-          selector:
-            number:
-              min: 1
-              max: 100
-              step: 1
-              mode: slider
+    hold_delay_seconds_1:
+      name: Button 1 hold delay (seconds)
+      default: 0.75
+      selector:
+        number:
+          min: 0.25
+          max: 5
+          step: 0.25
+          mode: slider
+    hold_delay_seconds_2:
+      name: Button 2 hold delay (seconds)
+      default: 0.75
+      selector:
+        number:
+          min: 0.25
+          max: 5
+          step: 0.25
+          mode: slider
 
-    actions_b1:
-      name: 1️⃣ Button 1 Actions
-      collapsed: true
-      input:
-        button1_single:
-          name: Pressed once
-          default:
-            - action: light.toggle
-              target:
-                entity_id: !input light_1
-          selector:
-            action: {}
+    b1_hold_consumed:
+      name: Helper toggle (input_boolean) for Button 1 (prevents double-toggle)
+      description: Create an input_boolean like input_boolean.bilresa_b1_hold_consumed
+      selector:
+        entity:
+          filter:
+            domain: input_boolean
+    b2_hold_consumed:
+      name: Helper toggle (input_boolean) for Button 2 (prevents double-toggle)
+      description: Create an input_boolean like input_boolean.bilresa_b2_hold_consumed
+      selector:
+        entity:
+          filter:
+            domain: input_boolean
 
-        button1_double:
-          name: Double press (multi_press_2)
-          default: []
-          selector:
-            action: {}
-
-        button1_while_holding:
-          name: While holding (repeats during long_press)
-          default: []
-          selector:
-            action: {}
-
-        button1_holding_interval:
-          name: Holding interval (seconds)
-          description: "Repeat interval for 'while holding' actions. Adjustable in 0.25s increments."
-          default: 0.25
-          selector:
-            number:
-              min: 0.25
-              max: 5
-              step: 0.25
-              mode: slider
-
-        button1_holding_max_iterations:
-          name: Holding max iterations
-          description: "Safety limit to prevent infinite loops if a release event is missed."
-          default: 200
-          selector:
-            number:
-              min: 1
-              max: 2000
-              step: 1
-
-    actions_b2:
-      name: 2️⃣ Button 2 Actions
-      collapsed: true
-      input:
-        button2_single:
-          name: Pressed once
-          default:
-            - action: light.toggle
-              target:
-                entity_id: !input light_2
-          selector:
-            action: {}
-
-        button2_double:
-          name: Double press (multi_press_2)
-          default: []
-          selector:
-            action: {}
-
-        button2_while_holding:
-          name: While holding (repeats during long_press)
-          default: []
-          selector:
-            action: {}
-
-        button2_holding_interval:
-          name: Holding interval (seconds)
-          description: "Repeat interval for 'while holding' actions. Adjustable in 0.25s increments."
-          default: 0.25
-          selector:
-            number:
-              min: 0.25
-              max: 5
-              step: 0.25
-              mode: slider
-
-        button2_holding_max_iterations:
-          name: Holding max iterations
-          default: 200
-          selector:
-            number:
-              min: 1
-              max: 2000
-              step: 1
+mode: restart
 
 trigger:
   - platform: state
-    id: button1
+    id: b1
     entity_id: !input button1_event
   - platform: state
-    id: button2
+    id: b2
     entity_id: !input button2_event
 
 condition:
   - condition: template
-    value_template: "{{ trigger.from_state is not none and trigger.to_state is not none }}"
-  - condition: template
-    value_template: "{{ trigger.from_state.state not in ['unknown','unavailable'] }}"
-  - condition: template
-    value_template: "{{ trigger.to_state.state not in ['unknown','unavailable'] }}"
-  - condition: template
-    value_template: "{{ trigger.from_state.state != trigger.to_state.state }}"
+    value_template: >
+      {{ trigger.from_state is not none and trigger.to_state is not none
+         and trigger.from_state.state != trigger.to_state.state }}
+
+variables:
+  press_type: "{{ trigger.to_state.attributes.event_type }}"
+  is_b1: "{{ trigger.id == 'b1' }}"
+  light_entity: "{{ iif(is_b1, (!input light_1), (!input light_2)) }}"
+  adaptive_entity: "{{ iif(is_b1, (!input adaptive_switch_1), (!input adaptive_switch_2)) }}"
+  hold_delay: "{{ iif(is_b1, (!input hold_delay_seconds_1), (!input hold_delay_seconds_2)) }}"
+  hold_consumed: "{{ iif(is_b1, (!input b1_hold_consumed), (!input b2_hold_consumed)) }}"
+  kelvin: !input full_white_kelvin
+  bright: !input full_white_brightness_pct
 
 action:
-  - variables:
-      trigger_id: "{{ trigger.id }}"
-      press_type: "{{ trigger.to_state.attributes.event_type }}"
-      b1_max: !input button1_holding_max_iterations
-      b2_max: !input button2_holding_max_iterations
-      target_light: >-
-        {{ iif(trigger_id == 'button1', (states('input_text.dummy') , ('')) , '') }}
-      # map targets cleanly (no input_text needed; keep everything template-driven)
-      light_for_button: >-
-        {{ iif(trigger_id == 'button1', ( ('' ~ ( !input light_1 )) ), ( ('' ~ ( !input light_2 )) )) }}
-      adaptive_for_button: >-
-        {{ iif(trigger_id == 'button1', ( ('' ~ ( !input adaptive_switch_1 )) ), ( ('' ~ ( !input adaptive_switch_2 )) )) }}
-
-  # 1) While-holding repeat loop (runs only during long_press, stops when event entity state changes)
-  - parallel:
-      - repeat:
-          while:
-            - condition: template
-              value_template: >-
-                {{ press_type == 'long_press'
-                   and trigger_id == 'button1'
-                   and states(trigger.entity_id) == trigger.to_state.state
-                   and (repeat.index|default(0) <= b1_max) }}
-          sequence:
-            - sequence: !input button1_while_holding
-            - delay:
-                seconds: !input button1_holding_interval
-
-      - repeat:
-          while:
-            - condition: template
-              value_template: >-
-                {{ press_type == 'long_press'
-                   and trigger_id == 'button2'
-                   and states(trigger.entity_id) == trigger.to_state.state
-                   and (repeat.index|default(0) <= b2_max) }}
-          sequence:
-            - sequence: !input button2_while_holding
-            - delay:
-                seconds: !input button2_holding_interval
-
-  # 2) Press routing + Full White toggle on long_press OR long_release
   - choose:
-      # Button 1 pressed once / double
+      # --- Pressed once: toggle the light ON/OFF ---
       - conditions:
           - condition: template
-            value_template: "{{ trigger_id == 'button1' and press_type == 'multi_press_1' }}"
-        sequence: !input button1_single
-
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger_id == 'button1' and press_type == 'multi_press_2' }}"
-        sequence: !input button1_double
-
-      # Button 2 pressed once / double
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger_id == 'button2' and press_type == 'multi_press_1' }}"
-        sequence: !input button2_single
-
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger_id == 'button2' and press_type == 'multi_press_2' }}"
-        sequence: !input button2_double
-
-      # Full White toggle: held down OR released after held down
-      - conditions:
-          - condition: template
-            value_template: >-
-              {{ press_type in ['long_press','long_release'] and trigger_id in ['button1','button2'] }}
+            value_template: "{{ press_type == 'multi_press_1' }}"
         sequence:
-          - variables:
-              tgt_light: >-
-                {{ iif(trigger_id == 'button1', ( !input light_1 ), ( !input light_2 )) }}
-              tgt_adaptive: >-
-                {{ iif(trigger_id == 'button1', ( !input adaptive_switch_1 ), ( !input adaptive_switch_2 )) }}
-              kelvin: !input full_white_kelvin
-              bright: !input full_white_brightness_pct
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ hold_consumed }}"
+          - action: light.toggle
+            target:
+              entity_id: "{{ light_entity }}"
 
-          # If adaptive switch provided:
-          #   - if it's ON -> turn it OFF + set full white
-          #   - else -> turn it ON (and do not force white)
+      # --- Held down: after delay, if still holding, toggle white mode ONCE ---
+      - conditions:
+          - condition: template
+            value_template: "{{ press_type == 'long_press' }}"
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ hold_consumed }}"
+          - delay:
+              seconds: "{{ hold_delay }}"
+          # still holding = event entity hasn't changed since long_press fired
+          - condition: template
+            value_template: "{{ states(trigger.entity_id) == trigger.to_state.state }}"
           - choose:
               - conditions:
                   - condition: template
-                    value_template: "{{ tgt_adaptive != '' and is_state(tgt_adaptive, 'on') }}"
+                    value_template: "{{ is_state(hold_consumed, 'off') }}"
                 sequence:
-                  - action: switch.turn_off
+                  - action: input_boolean.turn_on
                     target:
-                      entity_id: "{{ tgt_adaptive }}"
-                  - action: light.turn_on
-                    target:
-                      entity_id: "{{ tgt_light }}"
-                    data:
-                      brightness_pct: "{{ bright }}"
-                      color_temp_kelvin: "{{ kelvin }}"
+                      entity_id: "{{ hold_consumed }}"
+                  - choose:
+                      # If you gave an adaptive switch, "toggle white mode" = toggle adaptive on/off
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ adaptive_entity != '' and is_state(adaptive_entity, 'on') }}"
+                        sequence:
+                          - action: switch.turn_off
+                            target:
+                              entity_id: "{{ adaptive_entity }}"
+                          - action: light.turn_on
+                            target:
+                              entity_id: "{{ light_entity }}"
+                            data:
+                              brightness_pct: "{{ bright }}"
+                              color_temp_kelvin: "{{ kelvin }}"
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ adaptive_entity != '' and is_state(adaptive_entity, 'off') }}"
+                        sequence:
+                          - action: switch.turn_on
+                            target:
+                              entity_id: "{{ adaptive_entity }}"
+                    default:
+                      # No adaptive switch provided: best-effort "white mode" = set full white
+                      - action: light.turn_on
+                        target:
+                          entity_id: "{{ light_entity }}"
+                        data:
+                          brightness_pct: "{{ bright }}"
+                          color_temp_kelvin: "{{ kelvin }}"
 
+      # --- Released after held: toggle white mode ONLY if hold-delay toggle did not already run ---
+      - conditions:
+          - condition: template
+            value_template: "{{ press_type == 'long_release' }}"
+        sequence:
+          - choose:
               - conditions:
                   - condition: template
-                    value_template: "{{ tgt_adaptive != '' and is_state(tgt_adaptive, 'off') }}"
+                    value_template: "{{ is_state(hold_consumed, 'off') }}"
                 sequence:
-                  - action: switch.turn_on
-                    target:
-                      entity_id: "{{ tgt_adaptive }}"
-
-            # No adaptive switch -> just toggle "full white" on/off by checking if light is on
-            default:
-              - choose:
-                  - conditions:
-                      - condition: template
-                        value_template: "{{ is_state(tgt_light, 'on') }}"
-                    sequence:
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ adaptive_entity != '' and is_state(adaptive_entity, 'on') }}"
+                        sequence:
+                          - action: switch.turn_off
+                            target:
+                              entity_id: "{{ adaptive_entity }}"
+                          - action: light.turn_on
+                            target:
+                              entity_id: "{{ light_entity }}"
+                            data:
+                              brightness_pct: "{{ bright }}"
+                              color_temp_kelvin: "{{ kelvin }}"
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ adaptive_entity != '' and is_state(adaptive_entity, 'off') }}"
+                        sequence:
+                          - action: switch.turn_on
+                            target:
+                              entity_id: "{{ adaptive_entity }}"
+                    default:
                       - action: light.turn_on
                         target:
-                          entity_id: "{{ tgt_light }}"
+                          entity_id: "{{ light_entity }}"
                         data:
                           brightness_pct: "{{ bright }}"
                           color_temp_kelvin: "{{ kelvin }}"
-                  - conditions:
-                      - condition: template
-                        value_template: "{{ not is_state(tgt_light, 'on') }}"
-                    sequence:
-                      - action: light.turn_on
-                        target:
-                          entity_id: "{{ tgt_light }}"
-                        data:
-                          brightness_pct: "{{ bright }}"
-                          color_temp_kelvin: "{{ kelvin }}"
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ hold_consumed }}"
