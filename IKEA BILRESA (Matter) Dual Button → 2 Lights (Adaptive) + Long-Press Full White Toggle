@@ -1,12 +1,13 @@
 blueprint:
-  name: IKEA BILRESA (Matter) Dual Button → 2 Lights + Adaptive per Light + Tap Toggle + Long-Hold Release Mode Toggle (No Helpers)
+  name: IKEA BILRESA (Matter) Dual Button → 2 Lights + Adaptive per Light + Tap Toggle + Long Hold (Release) Mode Toggle (No Helpers)
   description: >
-    Tap (multi_press_1): toggle light on/off
-    Hold (long_press): if held >= threshold, then on release (long_release) toggle mode:
-      Adaptive ON -> White mode (Adaptive OFF + force white)
-      Adaptive OFF -> Adaptive ON
-    If released before threshold: do nothing
-    No helpers needed; uses wait_for_trigger to observe release after hold starts.
+    - Tap: toggle light on/off
+    - Hold: no action while holding
+    - Release after hold:
+        * only if held >= threshold (0.25s steps)
+        * only if light is ON
+        * toggles Adaptive <-> White mode for that light
+    No helpers required. Avoids !input inside templates by staging inputs as plain variables first.
   domain: automation
 
   input:
@@ -44,6 +45,7 @@ blueprint:
 
     adaptive_switch_1:
       name: Adaptive Lighting switch for Light 1 (recommended)
+      description: "e.g. switch.adaptive_lighting_<instance_for_light_1>"
       default: ""
       selector:
         entity:
@@ -52,6 +54,7 @@ blueprint:
 
     adaptive_switch_2:
       name: Adaptive Lighting switch for Light 2 (recommended)
+      description: "e.g. switch.adaptive_lighting_<instance_for_light_2>"
       default: ""
       selector:
         entity:
@@ -98,6 +101,23 @@ blueprint:
           step: 0.25
           mode: slider
 
+    # If your event_type strings differ, set them here instead of editing the YAML logic
+    tap_event_type:
+      name: Tap event_type
+      default: multi_press_1
+      selector:
+        text: {}
+    hold_event_type:
+      name: Hold (start) event_type
+      default: long_press
+      selector:
+        text: {}
+    release_event_type:
+      name: Release (after hold) event_type
+      default: long_release
+      selector:
+        text: {}
+
 mode: restart
 
 trigger:
@@ -117,7 +137,7 @@ condition:
          and trigger.from_state.state != trigger.to_state.state }}
 
 variables:
-  # Raw inputs (NO templates here)
+  # ---- Stage blueprint inputs as plain YAML values (NO Jinja here) ----
   light1: !input light_1
   light2: !input light_2
   adaptive1: !input adaptive_switch_1
@@ -126,8 +146,11 @@ variables:
   threshold2: !input hold_threshold_2
   kelvin: !input full_white_kelvin
   bright: !input full_white_brightness_pct
+  tap_type: !input tap_event_type
+  hold_type: !input hold_event_type
+  release_type: !input release_event_type
 
-  # Derived values (templates allowed)
+  # ---- Derived variables (Jinja OK) ----
   press_type: "{{ trigger.to_state.attributes.event_type }}"
   is_b1: "{{ trigger.id == 'b1' }}"
   event_entity: "{{ trigger.entity_id }}"
@@ -137,49 +160,52 @@ variables:
 
 action:
   - choose:
-      # Tap -> toggle on/off
+      # ---------------------------
+      # TAP -> toggle on/off
+      # ---------------------------
       - conditions:
           - condition: template
-            value_template: "{{ press_type == 'multi_press_1' }}"
+            value_template: "{{ press_type == tap_type }}"
         sequence:
           - action: light.toggle
             target:
               entity_id: "{{ target_light }}"
 
-      # Hold start -> only act if held >= threshold; then toggle mode on release
+      # ---------------------------
+      # HOLD START -> decide if this becomes a "long hold"
+      # We only act on RELEASE, and only if held >= threshold.
+      # ---------------------------
       - conditions:
           - condition: template
-            value_template: "{{ press_type == 'long_press' }}"
+            value_template: "{{ press_type == hold_type }}"
         sequence:
-          # If release happens BEFORE threshold, it's a short hold -> do nothing.
-          - wait_for_trigger:
-              - platform: state
-                entity_id: "{{ event_entity }}"
+          # 1) If release happens BEFORE threshold => short hold => do nothing
+          - wait_template: >
+              {{ state_attr(event_entity, 'event_type') == release_type }}
             timeout:
               seconds: "{{ hold_threshold }}"
             continue_on_timeout: true
 
-          # If we timed out => long hold. Now wait for actual release.
+          # If wait_template completed, we saw release before threshold -> exit.
           - choose:
               - conditions:
                   - condition: template
                     value_template: "{{ not wait.completed }}"
                 sequence:
-                  - wait_for_trigger:
-                      - platform: state
-                        entity_id: "{{ event_entity }}"
+                  # 2) We timed out => long hold. Now wait for actual release, then toggle mode.
+                  - wait_template: >
+                      {{ state_attr(event_entity, 'event_type') == release_type }}
                     timeout:
                       minutes: 10
                     continue_on_timeout: false
 
-                  - condition: template
-                    value_template: "{{ wait.trigger.to_state.attributes.event_type == 'long_release' }}"
-
+                  # Only toggle mode if light is ON
                   - condition: template
                     value_template: "{{ is_state(target_light, 'on') }}"
 
+                  # Toggle mode based on adaptive switch state
                   - choose:
-                      # Adaptive ON -> White mode
+                      # Adaptive ON -> White mode (turn adaptive OFF + force white)
                       - conditions:
                           - condition: template
                             value_template: "{{ target_adaptive != '' and is_state(target_adaptive, 'on') }}"
@@ -194,7 +220,7 @@ action:
                               brightness_pct: "{{ bright }}"
                               color_temp_kelvin: "{{ kelvin }}"
 
-                      # Adaptive OFF -> Adaptive ON
+                      # Adaptive OFF -> Adaptive ON (return to adaptive)
                       - conditions:
                           - condition: template
                             value_template: "{{ target_adaptive != '' and is_state(target_adaptive, 'off') }}"
@@ -202,6 +228,7 @@ action:
                           - action: switch.turn_on
                             target:
                               entity_id: "{{ target_adaptive }}"
+                          # Optional nudge so adaptive takes over immediately
                           - delay:
                               milliseconds: 150
                           - action: light.turn_on
@@ -209,7 +236,7 @@ action:
                               entity_id: "{{ target_light }}"
                             data: {}
                     default:
-                      # No adaptive switch configured: best-effort white only
+                      # If no adaptive switch is configured, best-effort "white" only
                       - action: light.turn_on
                         target:
                           entity_id: "{{ target_light }}"
