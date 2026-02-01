@@ -1,10 +1,11 @@
 blueprint:
-  name: IKEA BILRESA (Matter) Dual Button → Toggle 2 Lights (Adaptive Lighting) + 3s Hold White/Adaptive Toggle (No Flicker)
+  name: IKEA BILRESA (Matter) Dual Button → Toggle 2 Lights (Adaptive Lighting per-light) + Accurate Hold White/Adaptive Toggle
   description: >
     For IKEA BILRESA 806.178.76 (Matter over Thread). Uses two Matter event entities (one per button).
-    Single press: toggle Light A/B. When turning ON, uses adaptive_lighting.apply (transition 0) so both
-    brightness + color are applied in one go (reduces flicker).
-    3-second hold: toggle between a selectable "white mode" and CURRENT Adaptive Lighting settings for that time.
+    Each button controls its own light and its own Adaptive Lighting switch (per-light instance).
+    Single press: toggle Light A/B and apply Adaptive Lighting (brightness + color).
+    Hold: waits for release; if not released within hold_seconds, toggles between selectable white mode and
+    CURRENT Adaptive Lighting settings for that time (for that specific light).
   domain: automation
 
   input:
@@ -23,27 +24,33 @@ blueprint:
           domain: event
 
     light_a:
-      name: Light A (toggled by Button A)
+      name: Light A (Button A)
       selector:
         entity:
           domain: light
 
     light_b:
-      name: Light B (toggled by Button B)
+      name: Light B (Button B)
       selector:
         entity:
           domain: light
 
-    adaptive_switch:
-      name: Adaptive Lighting switch
-      description: Your Adaptive Lighting switch entity (e.g., switch.adaptive_lighting_living_room)
+    adaptive_switch_a:
+      name: Adaptive Lighting switch for Light A
+      description: Adaptive Lighting switch entity dedicated to Light A (e.g., switch.adaptive_lighting_kitchen)
+      selector:
+        entity:
+          domain: switch
+
+    adaptive_switch_b:
+      name: Adaptive Lighting switch for Light B
+      description: Adaptive Lighting switch entity dedicated to Light B (e.g., switch.adaptive_lighting_entryway)
       selector:
         entity:
           domain: switch
 
     hold_seconds:
       name: Hold duration seconds
-      description: How long a hold must be before the white/adaptive toggle triggers
       default: 3
       selector:
         number:
@@ -54,7 +61,6 @@ blueprint:
 
     white_temp_kelvin:
       name: White mode color temp (Kelvin)
-      description: Color temperature to use for the "white mode"
       default: 3000
       selector:
         number:
@@ -65,7 +71,6 @@ blueprint:
 
     white_brightness_pct:
       name: White mode brightness (%)
-      description: Brightness percent to use for the "white mode"
       default: 100
       selector:
         number:
@@ -76,7 +81,6 @@ blueprint:
 
     white_temp_tolerance_kelvin:
       name: White mode tolerance (Kelvin)
-      description: If current color_temp_kelvin is within this tolerance of the white temp, it's considered "already in white mode"
       default: 150
       selector:
         number:
@@ -102,9 +106,14 @@ trigger:
       - unavailable
 
 variables:
+  button_a_event: !input button_a_event
+  button_b_event: !input button_b_event
+
   light_a: !input light_a
   light_b: !input light_b
-  adaptive: !input adaptive_switch
+
+  adaptive_a: !input adaptive_switch_a
+  adaptive_b: !input adaptive_switch_b
 
   hold_seconds: !input hold_seconds
   white_temp_kelvin: !input white_temp_kelvin
@@ -127,120 +136,159 @@ variables:
     - hold
     - button_hold
     - held
+    - long
+
+  # Common "hold end" / release types (varies by firmware/controller)
+  hold_end_types:
+    - long_release
+    - long_press_end
+    - release
+    - released
+    - button_release
+    - hold_release
+    - up
 
   etype: "{{ state_attr(trigger.entity_id, 'event_type') | default('') }}"
 
 action:
   - choose:
-      ############################################################
-      # 3s HOLD: Button A -> toggle White <-> CURRENT Adaptive (Light A)
-      ############################################################
+      ######################################################################
+      # HOLD: Button A -> accurate hold detection -> toggle white/adaptive (Light A)
+      ######################################################################
       - conditions:
           - condition: trigger
             id: button_a
           - condition: template
             value_template: "{{ etype in hold_start_types }}"
         sequence:
-          - delay:
+          - wait_for_trigger:
+              - platform: state
+                entity_id: !input button_a_event
+            timeout:
               seconds: "{{ hold_seconds }}"
-          - variables:
-              target_light: "{{ light_a }}"
-              cur_ct: "{{ state_attr(target_light, 'color_temp_kelvin') | default(0) | int }}"
-              in_white_mode: >-
-                {{
-                  is_state(target_light, 'on')
-                  and cur_ct > 0
-                  and (cur_ct - (white_temp_kelvin | int)) | abs <= (white_temp_tolerance_kelvin | int)
-                }}
+            continue_on_timeout: true
           - choose:
-              # If currently in white mode, revert to CURRENT Adaptive settings (brightness + color)
-              - conditions: "{{ in_white_mode }}"
-                sequence:
+              - conditions:
+                  - condition: template
+                    value_template: >-
+                      {{
+                        wait.trigger is not none
+                        and (state_attr(button_a_event, 'event_type') | default('')) in hold_end_types
+                      }}
+                sequence: []
+            default:
+              - variables:
+                  target_light: "{{ light_a }}"
+                  target_adaptive: "{{ adaptive_a }}"
+                  cur_ct: "{{ state_attr(target_light, 'color_temp_kelvin') | default(0) | int }}"
+                  in_white_mode: >-
+                    {{
+                      is_state(target_light, 'on')
+                      and cur_ct > 0
+                      and (cur_ct - (white_temp_kelvin | int)) | abs <= (white_temp_tolerance_kelvin | int)
+                    }}
+              - choose:
+                  - conditions: "{{ in_white_mode }}"
+                    sequence:
+                      - service: adaptive_lighting.set_manual_control
+                        data:
+                          entity_id: "{{ target_adaptive }}"
+                          lights:
+                            - "{{ target_light }}"
+                          manual_control: false
+                      - service: adaptive_lighting.apply
+                        data:
+                          entity_id: "{{ target_adaptive }}"
+                          lights:
+                            - "{{ target_light }}"
+                          adapt_brightness: true
+                          adapt_color: true
+                          transition: 0
+                          turn_on_lights: true
+                default:
                   - service: adaptive_lighting.set_manual_control
                     data:
-                      entity_id: "{{ adaptive }}"
+                      entity_id: "{{ target_adaptive }}"
                       lights:
                         - "{{ target_light }}"
-                      manual_control: false
-                  - service: adaptive_lighting.apply
+                      manual_control: true
+                  - service: light.turn_on
+                    target:
+                      entity_id: "{{ target_light }}"
                     data:
-                      entity_id: "{{ adaptive }}"
-                      lights:
-                        - "{{ target_light }}"
-                      adapt_brightness: true
-                      adapt_color: true
-                      transition: 0
-                      turn_on_lights: true
-            default:
-              # Otherwise switch into white mode and pause Adaptive for that light
-              - service: adaptive_lighting.set_manual_control
-                data:
-                  entity_id: "{{ adaptive }}"
-                  lights:
-                    - "{{ target_light }}"
-                  manual_control: true
-              - service: light.turn_on
-                target:
-                  entity_id: "{{ target_light }}"
-                data:
-                  color_temp_kelvin: "{{ white_temp_kelvin }}"
-                  brightness_pct: "{{ white_brightness_pct }}"
+                      color_temp_kelvin: "{{ white_temp_kelvin }}"
+                      brightness_pct: "{{ white_brightness_pct }}"
 
-      ############################################################
-      # 3s HOLD: Button B -> toggle White <-> CURRENT Adaptive (Light B)
-      ############################################################
+      ######################################################################
+      # HOLD: Button B -> accurate hold detection -> toggle white/adaptive (Light B)
+      ######################################################################
       - conditions:
           - condition: trigger
             id: button_b
           - condition: template
             value_template: "{{ etype in hold_start_types }}"
         sequence:
-          - delay:
+          - wait_for_trigger:
+              - platform: state
+                entity_id: !input button_b_event
+            timeout:
               seconds: "{{ hold_seconds }}"
-          - variables:
-              target_light: "{{ light_b }}"
-              cur_ct: "{{ state_attr(target_light, 'color_temp_kelvin') | default(0) | int }}"
-              in_white_mode: >-
-                {{
-                  is_state(target_light, 'on')
-                  and cur_ct > 0
-                  and (cur_ct - (white_temp_kelvin | int)) | abs <= (white_temp_tolerance_kelvin | int)
-                }}
+            continue_on_timeout: true
           - choose:
-              - conditions: "{{ in_white_mode }}"
-                sequence:
+              - conditions:
+                  - condition: template
+                    value_template: >-
+                      {{
+                        wait.trigger is not none
+                        and (state_attr(button_b_event, 'event_type') | default('')) in hold_end_types
+                      }}
+                sequence: []
+            default:
+              - variables:
+                  target_light: "{{ light_b }}"
+                  target_adaptive: "{{ adaptive_b }}"
+                  cur_ct: "{{ state_attr(target_light, 'color_temp_kelvin') | default(0) | int }}"
+                  in_white_mode: >-
+                    {{
+                      is_state(target_light, 'on')
+                      and cur_ct > 0
+                      and (cur_ct - (white_temp_kelvin | int)) | abs <= (white_temp_tolerance_kelvin | int)
+                    }}
+              - choose:
+                  - conditions: "{{ in_white_mode }}"
+                    sequence:
+                      - service: adaptive_lighting.set_manual_control
+                        data:
+                          entity_id: "{{ target_adaptive }}"
+                          lights:
+                            - "{{ target_light }}"
+                          manual_control: false
+                      - service: adaptive_lighting.apply
+                        data:
+                          entity_id: "{{ target_adaptive }}"
+                          lights:
+                            - "{{ target_light }}"
+                          adapt_brightness: true
+                          adapt_color: true
+                          transition: 0
+                          turn_on_lights: true
+                default:
                   - service: adaptive_lighting.set_manual_control
                     data:
-                      entity_id: "{{ adaptive }}"
+                      entity_id: "{{ target_adaptive }}"
                       lights:
                         - "{{ target_light }}"
-                      manual_control: false
-                  - service: adaptive_lighting.apply
+                      manual_control: true
+                  - service: light.turn_on
+                    target:
+                      entity_id: "{{ target_light }}"
                     data:
-                      entity_id: "{{ adaptive }}"
-                      lights:
-                        - "{{ target_light }}"
-                      adapt_brightness: true
-                      adapt_color: true
-                      transition: 0
-                      turn_on_lights: true
-            default:
-              - service: adaptive_lighting.set_manual_control
-                data:
-                  entity_id: "{{ adaptive }}"
-                  lights:
-                    - "{{ target_light }}"
-                  manual_control: true
-              - service: light.turn_on
-                target:
-                  entity_id: "{{ target_light }}"
-                data:
-                  color_temp_kelvin: "{{ white_temp_kelvin }}"
-                  brightness_pct: "{{ white_brightness_pct }}"
+                      color_temp_kelvin: "{{ white_temp_kelvin }}"
+                      brightness_pct: "{{ white_brightness_pct }}"
 
-      ############################################################
-      # SINGLE PRESS: Button A -> toggle Light A (Adaptive on ON, both brightness + color)
-      ############################################################
+      ######################################################################
+      # SINGLE PRESS: Button A -> toggle Light A (Adaptive on ON)
+      ######################################################################
       - conditions:
           - condition: trigger
             id: button_a
@@ -256,14 +304,13 @@ action:
             default:
               - service: adaptive_lighting.set_manual_control
                 data:
-                  entity_id: "{{ adaptive }}"
+                  entity_id: "{{ adaptive_a }}"
                   lights:
                     - "{{ light_a }}"
                   manual_control: false
-              # Apply both brightness + color in one call (turns on if off)
               - service: adaptive_lighting.apply
                 data:
-                  entity_id: "{{ adaptive }}"
+                  entity_id: "{{ adaptive_a }}"
                   lights:
                     - "{{ light_a }}"
                   adapt_brightness: true
@@ -271,9 +318,9 @@ action:
                   transition: 0
                   turn_on_lights: true
 
-      ############################################################
-      # SINGLE PRESS: Button B -> toggle Light B (Adaptive on ON, both brightness + color)
-      ############################################################
+      ######################################################################
+      # SINGLE PRESS: Button B -> toggle Light B (Adaptive on ON)
+      ######################################################################
       - conditions:
           - condition: trigger
             id: button_b
@@ -289,13 +336,13 @@ action:
             default:
               - service: adaptive_lighting.set_manual_control
                 data:
-                  entity_id: "{{ adaptive }}"
+                  entity_id: "{{ adaptive_b }}"
                   lights:
                     - "{{ light_b }}"
                   manual_control: false
               - service: adaptive_lighting.apply
                 data:
-                  entity_id: "{{ adaptive }}"
+                  entity_id: "{{ adaptive_b }}"
                   lights:
                     - "{{ light_b }}"
                   adapt_brightness: true
