@@ -1,0 +1,133 @@
+blueprint:
+  name: IKEA BILRESA (Matter) Dual Button → Toggle 2 Lights (Adaptive Lighting)
+  description: >
+    For IKEA BILRESA 806.178.76 (Matter over Thread). Uses the two Matter event entities
+    (one per button). Button A toggles Light A, Button B toggles Light B.
+    When turning ON, applies Adaptive Lighting so it follows current adaptive settings.
+  domain: automation
+
+  input:
+    button_a_event:
+      name: Button A event entity
+      description: Select the Matter event entity for button A (e.g., event.bilresa_button_1)
+      selector:
+        entity:
+          domain: event
+
+    button_b_event:
+      name: Button B event entity
+      description: Select the Matter event entity for button B (e.g., event.bilresa_button_2)
+      selector:
+        entity:
+          domain: event
+
+    light_a:
+      name: Light A (toggled by Button A)
+      selector:
+        entity:
+          domain: light
+
+    light_b:
+      name: Light B (toggled by Button B)
+      selector:
+        entity:
+          domain: light
+
+    adaptive_switch:
+      name: Adaptive Lighting switch
+      description: Your Adaptive Lighting switch entity (e.g., switch.adaptive_lighting_living_room)
+      selector:
+        entity:
+          domain: switch
+
+mode: restart
+
+trigger:
+  # Matter button events are "event entities" whose state updates to a timestamp on every press. :contentReference[oaicite:6]{index=6}
+  - platform: state
+    entity_id: !input button_a_event
+    id: button_a
+    not_from:
+      - unknown
+      - unavailable
+  - platform: state
+    entity_id: !input button_b_event
+    id: button_b
+    not_from:
+      - unknown
+      - unavailable
+
+variables:
+  light_a: !input light_a
+  light_b: !input light_b
+  adaptive: !input adaptive_switch
+
+  # Event type strings vary by device/firmware/controller. We accept common "single press" types
+  # and ignore others (double/long) by default.
+  single_press_types:
+    - press
+    - pressed
+    - short_press
+    - short_release
+    - single_press
+    - multi_press_1
+
+  etype: "{{ state_attr(trigger.entity_id, 'event_type') | default('') }}"
+
+action:
+  - choose:
+      # Button A single-press -> toggle Light A
+      - conditions:
+          - condition: trigger
+            id: button_a
+          - condition: template
+            value_template: "{{ etype in single_press_types or etype == '' }}"
+        sequence:
+          - choose:
+              - conditions: "{{ is_state(light_a, 'on') }}"
+                sequence:
+                  - service: light.turn_off
+                    target:
+                      entity_id: "{{ light_a }}"
+            default:
+              # Clear manual control so Adaptive Lighting can take over again (if it was paused). :contentReference[oaicite:7]{index=7}
+              - service: adaptive_lighting.set_manual_control
+                data:
+                  entity_id: "{{ adaptive }}"
+                  lights:
+                    - "{{ light_a }}"
+                  manual_control: false
+              # Apply current adaptive settings AND turn it on. :contentReference[oaicite:8]{index=8}
+              - service: adaptive_lighting.apply
+                data:
+                  entity_id: "{{ adaptive }}"
+                  lights:
+                    - "{{ light_a }}"
+                  turn_on_lights: true
+
+      # Button B single-press -> toggle Light B
+      - conditions:
+          - condition: trigger
+            id: button_b
+          - condition: template
+            value_template: "{{ etype in single_press_types or etype == '' }}"
+        sequence:
+          - choose:
+              - conditions: "{{ is_state(light_b, 'on') }}"
+                sequence:
+                  - service: light.turn_off
+                    target:
+                      entity_id: "{{ light_b }}"
+            default:
+              - service: adaptive_lighting.set_manual_control
+                data:
+                  entity_id: "{{ adaptive }}"
+                  lights:
+                    - "{{ light_b }}"
+                  manual_control: false
+              - service: adaptive_lighting.apply
+                data:
+                  entity_id: "{{ adaptive }}"
+                  lights:
+                    - "{{ light_b }}"
+                  turn_on_lights: true
