@@ -2,7 +2,8 @@ blueprint:
   name: IKEA BILRESA (Matter) Dual Button → Toggle 2 Lights (Adaptive Lighting) + 3s Hold White/Adaptive Toggle (No Flicker)
   description: >
     For IKEA BILRESA 806.178.76 (Matter over Thread). Uses two Matter event entities (one per button).
-    Single press: toggle Light A/B, letting Adaptive Lighting intercept light.turn_on (reduces flicker).
+    Single press: toggle Light A/B. When turning ON, uses adaptive_lighting.apply (transition 0) so both
+    brightness + color are applied in one go (reduces flicker).
     3-second hold: toggle between a selectable "white mode" and CURRENT Adaptive Lighting settings for that time.
   domain: automation
 
@@ -110,7 +111,7 @@ variables:
   white_brightness_pct: !input white_brightness_pct
   white_temp_tolerance_kelvin: !input white_temp_tolerance_kelvin
 
-  # Accept common "single press" types; ignore others by default.
+  # Common "single press" types
   single_press_types:
     - press
     - pressed
@@ -152,7 +153,7 @@ action:
                   and (cur_ct - (white_temp_kelvin | int)) | abs <= (white_temp_tolerance_kelvin | int)
                 }}
           - choose:
-              # If currently in white mode, revert to CURRENT Adaptive settings
+              # If currently in white mode, revert to CURRENT Adaptive settings (brightness + color)
               - conditions: "{{ in_white_mode }}"
                 sequence:
                   - service: adaptive_lighting.set_manual_control
@@ -161,10 +162,15 @@ action:
                       lights:
                         - "{{ target_light }}"
                       manual_control: false
-                  # Let Adaptive Lighting intercept and set correct values in the same turn_on
-                  - service: light.turn_on
-                    target:
-                      entity_id: "{{ target_light }}"
+                  - service: adaptive_lighting.apply
+                    data:
+                      entity_id: "{{ adaptive }}"
+                      lights:
+                        - "{{ target_light }}"
+                      adapt_brightness: true
+                      adapt_color: true
+                      transition: 0
+                      turn_on_lights: true
             default:
               # Otherwise switch into white mode and pause Adaptive for that light
               - service: adaptive_lighting.set_manual_control
@@ -209,9 +215,15 @@ action:
                       lights:
                         - "{{ target_light }}"
                       manual_control: false
-                  - service: light.turn_on
-                    target:
-                      entity_id: "{{ target_light }}"
+                  - service: adaptive_lighting.apply
+                    data:
+                      entity_id: "{{ adaptive }}"
+                      lights:
+                        - "{{ target_light }}"
+                      adapt_brightness: true
+                      adapt_color: true
+                      transition: 0
+                      turn_on_lights: true
             default:
               - service: adaptive_lighting.set_manual_control
                 data:
@@ -227,7 +239,7 @@ action:
                   brightness_pct: "{{ white_brightness_pct }}"
 
       ############################################################
-      # SINGLE PRESS: Button A -> toggle Light A (Adaptive on ON, no apply call)
+      # SINGLE PRESS: Button A -> toggle Light A (Adaptive on ON, both brightness + color)
       ############################################################
       - conditions:
           - condition: trigger
@@ -242,20 +254,25 @@ action:
                     target:
                       entity_id: "{{ light_a }}"
             default:
-              # Ensure Adaptive Lighting is allowed to control this light...
               - service: adaptive_lighting.set_manual_control
                 data:
                   entity_id: "{{ adaptive }}"
                   lights:
                     - "{{ light_a }}"
                   manual_control: false
-              # ...then just turn it on; AL intercepts the turn_on to set correct CT/brightness.
-              - service: light.turn_on
-                target:
-                  entity_id: "{{ light_a }}"
+              # Apply both brightness + color in one call (turns on if off)
+              - service: adaptive_lighting.apply
+                data:
+                  entity_id: "{{ adaptive }}"
+                  lights:
+                    - "{{ light_a }}"
+                  adapt_brightness: true
+                  adapt_color: true
+                  transition: 0
+                  turn_on_lights: true
 
       ############################################################
-      # SINGLE PRESS: Button B -> toggle Light B (Adaptive on ON, no apply call)
+      # SINGLE PRESS: Button B -> toggle Light B (Adaptive on ON, both brightness + color)
       ############################################################
       - conditions:
           - condition: trigger
@@ -276,6 +293,12 @@ action:
                   lights:
                     - "{{ light_b }}"
                   manual_control: false
-              - service: light.turn_on
-                target:
-                  entity_id: "{{ light_b }}"
+              - service: adaptive_lighting.apply
+                data:
+                  entity_id: "{{ adaptive }}"
+                  lights:
+                    - "{{ light_b }}"
+                  adapt_brightness: true
+                  adapt_color: true
+                  transition: 0
+                  turn_on_lights: true
