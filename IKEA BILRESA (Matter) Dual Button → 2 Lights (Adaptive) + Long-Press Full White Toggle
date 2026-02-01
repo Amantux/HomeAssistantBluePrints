@@ -1,0 +1,89 @@
+blueprint:
+  name: IKEA BILRESA (Matter) Dual Button → 2 Lights (Adaptive) + Long-Press Full White Toggle
+  description: >
+    For IKEA BILRESA dual-button remote (Matter).
+    - Button 1 single press: toggle Light A (ON uses Adaptive Lighting)
+    - Button 2 single press: toggle Light B (ON uses Adaptive Lighting)
+    - Long press (~3s): toggle Full Power White ↔ Adaptive Lighting per light
+    Uses the same no-flash trigger guard pattern as the community BILRESA blueprint.
+  domain: automation
+
+  input:
+    button1_event:
+      name: Button 1 event entity
+      description: Matter event entity for Button 1 (event.* with device_class button)
+      selector:
+        entity:
+          multiple: true
+          filter:
+            integration: matter
+            domain: event
+            device_class: button
+
+    button2_event:
+      name: Button 2 event entity
+      description: Matter event entity for Button 2 (event.* with device_class button)
+      selector:
+        entity:
+          multiple: true
+          filter:
+            integration: matter
+            domain: event
+            device_class: button
+
+    light_a:
+      name: Light A (Button 1)
+      selector:
+        entity:
+          domain: light
+
+    light_b:
+      name: Light B (Button 2)
+      selector:
+        entity:
+          domain: light
+
+    adaptive_switch:
+      name: Adaptive Lighting switch
+      description: The Adaptive Lighting instance that manages these lights (switch.adaptive_lighting_*)
+      selector:
+        entity:
+          domain: switch
+
+    apply_transition:
+      name: Adaptive apply transition (seconds)
+      description: Small transition helps prevent brief wrong-state flashes on turn-on
+      default: 0.1
+      selector:
+        number:
+          min: 0
+          max: 2
+          step: 0.1
+          unit_of_measurement: s
+
+    full_white_kelvin:
+      name: Full white Kelvin (long press)
+      default: 4000
+      selector:
+        number:
+          min: 2700
+          max: 6500
+          step: 100
+          unit_of_measurement: K
+
+mode: restart
+
+trigger:
+  - platform: state
+    id: button1
+    entity_id: !input button1_event
+  - platform: state
+    id: button2
+    entity_id: !input button2_event
+
+# No-flash guard: only act on real state changes, ignore unknown/unavailable
+condition:
+  - condition: template
+    value_template: "{{ trigger.from_state.state not in ['unknown', 'unavailable'] }}"
+  - condition: template
+    value_template: "{{ trigger.to_state.state not in ['unknown',]()
