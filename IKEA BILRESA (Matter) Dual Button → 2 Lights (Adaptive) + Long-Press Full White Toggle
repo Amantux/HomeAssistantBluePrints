@@ -1,20 +1,18 @@
 blueprint:
-  name: IKEA BILRESA (Matter) Dual Button → 2 Lights (Adaptive) + Long-Press Full White Toggle
+  name: IKEA BILRESA (Matter) Dual Button → 2 Lights (Option A: Turn On then Adaptive Apply) + Long-Press Full White Toggle
   description: >
-    For IKEA BILRESA dual-button remote (Matter).
-    - Button 1 single press: toggle Light A (ON uses Adaptive Lighting)
-    - Button 2 single press: toggle Light B (ON uses Adaptive Lighting)
-    - Long press (~3s): toggle Full Power White ↔ Adaptive Lighting per light
-    Uses the same no-flash trigger guard pattern as the community BILRESA blueprint.
+    Option A to reduce flicker: on single-press ON, turn the light on without attributes first,
+    then apply Adaptive Lighting (optionally after a small delay). Long press toggles full white ↔ adaptive.
+    Designed for IKEA BILRESA dual-button Matter remote (IKEA 806.178.76).
   domain: automation
 
   input:
     button1_event:
       name: Button 1 event entity
-      description: Matter event entity for Button 1 (event.* with device_class button)
+      description: Matter event entity for Button 1
       selector:
         entity:
-          multiple: true
+          multiple: false
           filter:
             integration: matter
             domain: event
@@ -22,10 +20,10 @@ blueprint:
 
     button2_event:
       name: Button 2 event entity
-      description: Matter event entity for Button 2 (event.* with device_class button)
+      description: Matter event entity for Button 2
       selector:
         entity:
-          multiple: true
+          multiple: false
           filter:
             integration: matter
             domain: event
@@ -45,14 +43,17 @@ blueprint:
 
     adaptive_switch:
       name: Adaptive Lighting switch
-      description: The Adaptive Lighting instance that manages these lights (switch.adaptive_lighting_*)
+      description: Must be the Adaptive Lighting instance that manages these lights (switch.adaptive_lighting_*)
       selector:
         entity:
-          domain: switch
+          multiple: false
+          filter:
+            integration: adaptive_lighting
+            domain: switch
 
     apply_transition:
       name: Adaptive apply transition (seconds)
-      description: Small transition helps prevent brief wrong-state flashes on turn-on
+      description: Small transition helps settle to adaptive values without visible stepping
       default: 0.1
       selector:
         number:
@@ -61,8 +62,19 @@ blueprint:
           step: 0.1
           unit_of_measurement: s
 
+    apply_delay_ms:
+      name: Delay before adaptive apply (ms)
+      description: Tiny delay can help bulbs that power on at a default/last state before accepting attribute updates
+      default: 150
+      selector:
+        number:
+          min: 0
+          max: 1000
+          step: 50
+          unit_of_measurement: ms
+
     full_white_kelvin:
-      name: Full white Kelvin (long press)
+      name: Full power white Kelvin (long press)
       default: 4000
       selector:
         number:
@@ -81,8 +93,10 @@ trigger:
     id: button2
     entity_id: !input button2_event
 
-# No-flash guard: only act on real state changes, ignore unknown/unavailable
+# “No flicker” guard pattern: ignore unknown/unavailable and only act on real state changes
 condition:
+  - condition: template
+    value_template: "{{ trigger.from_state is not none and trigger.to_state is not none }}"
   - condition: template
     value_template: "{{ trigger.from_state.state not in ['unknown', 'unavailable'] }}"
   - condition: template
@@ -93,10 +107,15 @@ condition:
 variables:
   adaptive: !input adaptive_switch
   tr: !input apply_transition
+  delay_ms: !input apply_delay_ms
   kelvin: !input full_white_kelvin
 
   trigger_id: "{{ trigger.id }}"
   press_type: "{{ trigger.to_state.attributes.event_type | default('') }}"
+
+  # Event mapping (matches common Matter BILRESA patterns)
+  single_press_type: "multi_press_1"
+  long_press_type: "long_press"
 
   # Full-white detection thresholds
   full_white_bri_min: 250
@@ -105,8 +124,8 @@ variables:
 action:
   - choose:
 
-      # ───────── Button 1 Single Press (multi_press_1) ─────────
-      - conditions: "{{ trigger_id == 'button1' and press_type == 'multi_press_1' }}"
+      # ───────── Button 1: SINGLE PRESS → toggle Light A (Option A turn-on flow) ─────────
+      - conditions: "{{ trigger_id == 'button1' and press_type == single_press_type }}"
         sequence:
           - variables:
               L: !input light_a
@@ -117,20 +136,32 @@ action:
                     target:
                       entity_id: "{{ L }}"
             default:
+              # Turn on first WITHOUT brightness/CT so the bulb comes up “normally”
+              - service: light.turn_on
+                target:
+                  entity_id: "{{ L }}"
+
+              # Ensure Adaptive Lighting owns it
               - service: adaptive_lighting.set_manual_control
                 data:
                   entity_id: "{{ adaptive }}"
                   lights: ["{{ L }}"]
                   manual_control: false
+
+              # Optional tiny delay, then apply current adaptive settings (do NOT turn_on via apply)
+              - choose:
+                  - conditions: "{{ (delay_ms | int) > 0 }}"
+                    sequence:
+                      - delay:
+                          milliseconds: "{{ delay_ms | int }}"
               - service: adaptive_lighting.apply
                 data:
                   entity_id: "{{ adaptive }}"
                   lights: ["{{ L }}"]
-                  turn_on_lights: true
-                  transition: "{{ tr }}"
+                  transition: "{{ tr | float }}"
 
-      # ───────── Button 2 Single Press (multi_press_1) ─────────
-      - conditions: "{{ trigger_id == 'button2' and press_type == 'multi_press_1' }}"
+      # ───────── Button 2: SINGLE PRESS → toggle Light B (Option A turn-on flow) ─────────
+      - conditions: "{{ trigger_id == 'button2' and press_type == single_press_type }}"
         sequence:
           - variables:
               L: !input light_b
@@ -141,20 +172,27 @@ action:
                     target:
                       entity_id: "{{ L }}"
             default:
+              - service: light.turn_on
+                target:
+                  entity_id: "{{ L }}"
               - service: adaptive_lighting.set_manual_control
                 data:
                   entity_id: "{{ adaptive }}"
                   lights: ["{{ L }}"]
                   manual_control: false
+              - choose:
+                  - conditions: "{{ (delay_ms | int) > 0 }}"
+                    sequence:
+                      - delay:
+                          milliseconds: "{{ delay_ms | int }}"
               - service: adaptive_lighting.apply
                 data:
                   entity_id: "{{ adaptive }}"
                   lights: ["{{ L }}"]
-                  turn_on_lights: true
-                  transition: "{{ tr }}"
+                  transition: "{{ tr | float }}"
 
-      # ───────── Button 1 Long Press (long_press) ─────────
-      - conditions: "{{ trigger_id == 'button1' and press_type == 'long_press' }}"
+      # ───────── Button 1: LONG PRESS → toggle Full White ↔ Adaptive (Light A) ─────────
+      - conditions: "{{ trigger_id == 'button1' and press_type == long_press_type }}"
         sequence:
           - variables:
               L: !input light_a
@@ -166,7 +204,7 @@ action:
                    and ct != 0
                    and ((ct - (kelvin | int)) | abs) <= full_white_kelvin_tol }}
           - choose:
-              # If already full white -> return to Adaptive Lighting
+              # If already full white -> restore Adaptive Lighting (keep on)
               - conditions: "{{ is_full_white_now }}"
                 sequence:
                   - service: adaptive_lighting.set_manual_control
@@ -178,8 +216,7 @@ action:
                     data:
                       entity_id: "{{ adaptive }}"
                       lights: ["{{ L }}"]
-                      turn_on_lights: true
-                      transition: "{{ tr }}"
+                      transition: "{{ tr | float }}"
             default:
               # Otherwise -> force full white and mark manual control
               - service: adaptive_lighting.set_manual_control
@@ -192,10 +229,10 @@ action:
                   entity_id: "{{ L }}"
                 data:
                   brightness: 255
-                  color_temp_kelvin: "{{ kelvin }}"
+                  color_temp_kelvin: "{{ kelvin | int }}"
 
-      # ───────── Button 2 Long Press (long_press) ─────────
-      - conditions: "{{ trigger_id == 'button2' and press_type == 'long_press' }}"
+      # ───────── Button 2: LONG PRESS → toggle Full White ↔ Adaptive (Light B) ─────────
+      - conditions: "{{ trigger_id == 'button2' and press_type == long_press_type }}"
         sequence:
           - variables:
               L: !input light_b
@@ -218,8 +255,7 @@ action:
                     data:
                       entity_id: "{{ adaptive }}"
                       lights: ["{{ L }}"]
-                      turn_on_lights: true
-                      transition: "{{ tr }}"
+                      transition: "{{ tr | float }}"
             default:
               - service: adaptive_lighting.set_manual_control
                 data:
@@ -231,4 +267,4 @@ action:
                   entity_id: "{{ L }}"
                 data:
                   brightness: 255
-                  color_temp_kelvin: "{{ kelvin }}"
+                  color_temp_kelvin: "{{ kelvin | int }}"
