@@ -86,4 +86,149 @@ condition:
   - condition: template
     value_template: "{{ trigger.from_state.state not in ['unknown', 'unavailable'] }}"
   - condition: template
-    value_template: "{{ trigger.to_state.state not in ['unknown',]()
+    value_template: "{{ trigger.to_state.state not in ['unknown', 'unavailable'] }}"
+  - condition: template
+    value_template: "{{ trigger.from_state.state != trigger.to_state.state }}"
+
+variables:
+  adaptive: !input adaptive_switch
+  tr: !input apply_transition
+  kelvin: !input full_white_kelvin
+
+  trigger_id: "{{ trigger.id }}"
+  press_type: "{{ trigger.to_state.attributes.event_type | default('') }}"
+
+  # Full-white detection thresholds
+  full_white_bri_min: 250
+  full_white_kelvin_tol: 250
+
+action:
+  - choose:
+
+      # ───────── Button 1 Single Press (multi_press_1) ─────────
+      - conditions: "{{ trigger_id == 'button1' and press_type == 'multi_press_1' }}"
+        sequence:
+          - variables:
+              L: !input light_a
+          - choose:
+              - conditions: "{{ is_state(L, 'on') }}"
+                sequence:
+                  - service: light.turn_off
+                    target:
+                      entity_id: "{{ L }}"
+            default:
+              - service: adaptive_lighting.set_manual_control
+                data:
+                  entity_id: "{{ adaptive }}"
+                  lights: ["{{ L }}"]
+                  manual_control: false
+              - service: adaptive_lighting.apply
+                data:
+                  entity_id: "{{ adaptive }}"
+                  lights: ["{{ L }}"]
+                  turn_on_lights: true
+                  transition: "{{ tr }}"
+
+      # ───────── Button 2 Single Press (multi_press_1) ─────────
+      - conditions: "{{ trigger_id == 'button2' and press_type == 'multi_press_1' }}"
+        sequence:
+          - variables:
+              L: !input light_b
+          - choose:
+              - conditions: "{{ is_state(L, 'on') }}"
+                sequence:
+                  - service: light.turn_off
+                    target:
+                      entity_id: "{{ L }}"
+            default:
+              - service: adaptive_lighting.set_manual_control
+                data:
+                  entity_id: "{{ adaptive }}"
+                  lights: ["{{ L }}"]
+                  manual_control: false
+              - service: adaptive_lighting.apply
+                data:
+                  entity_id: "{{ adaptive }}"
+                  lights: ["{{ L }}"]
+                  turn_on_lights: true
+                  transition: "{{ tr }}"
+
+      # ───────── Button 1 Long Press (long_press) ─────────
+      - conditions: "{{ trigger_id == 'button1' and press_type == 'long_press' }}"
+        sequence:
+          - variables:
+              L: !input light_a
+              bri: "{{ state_attr(L, 'brightness') | int(0) }}"
+              ct: "{{ state_attr(L, 'color_temp_kelvin') | int(0) }}"
+              is_full_white_now: >
+                {{ is_state(L,'on')
+                   and bri >= full_white_bri_min
+                   and ct != 0
+                   and ((ct - (kelvin | int)) | abs) <= full_white_kelvin_tol }}
+          - choose:
+              # If already full white -> return to Adaptive Lighting
+              - conditions: "{{ is_full_white_now }}"
+                sequence:
+                  - service: adaptive_lighting.set_manual_control
+                    data:
+                      entity_id: "{{ adaptive }}"
+                      lights: ["{{ L }}"]
+                      manual_control: false
+                  - service: adaptive_lighting.apply
+                    data:
+                      entity_id: "{{ adaptive }}"
+                      lights: ["{{ L }}"]
+                      turn_on_lights: true
+                      transition: "{{ tr }}"
+            default:
+              # Otherwise -> force full white and mark manual control
+              - service: adaptive_lighting.set_manual_control
+                data:
+                  entity_id: "{{ adaptive }}"
+                  lights: ["{{ L }}"]
+                  manual_control: true
+              - service: light.turn_on
+                target:
+                  entity_id: "{{ L }}"
+                data:
+                  brightness: 255
+                  color_temp_kelvin: "{{ kelvin }}"
+
+      # ───────── Button 2 Long Press (long_press) ─────────
+      - conditions: "{{ trigger_id == 'button2' and press_type == 'long_press' }}"
+        sequence:
+          - variables:
+              L: !input light_b
+              bri: "{{ state_attr(L, 'brightness') | int(0) }}"
+              ct: "{{ state_attr(L, 'color_temp_kelvin') | int(0) }}"
+              is_full_white_now: >
+                {{ is_state(L,'on')
+                   and bri >= full_white_bri_min
+                   and ct != 0
+                   and ((ct - (kelvin | int)) | abs) <= full_white_kelvin_tol }}
+          - choose:
+              - conditions: "{{ is_full_white_now }}"
+                sequence:
+                  - service: adaptive_lighting.set_manual_control
+                    data:
+                      entity_id: "{{ adaptive }}"
+                      lights: ["{{ L }}"]
+                      manual_control: false
+                  - service: adaptive_lighting.apply
+                    data:
+                      entity_id: "{{ adaptive }}"
+                      lights: ["{{ L }}"]
+                      turn_on_lights: true
+                      transition: "{{ tr }}"
+            default:
+              - service: adaptive_lighting.set_manual_control
+                data:
+                  entity_id: "{{ adaptive }}"
+                  lights: ["{{ L }}"]
+                  manual_control: true
+              - service: light.turn_on
+                target:
+                  entity_id: "{{ L }}"
+                data:
+                  brightness: 255
+                  color_temp_kelvin: "{{ kelvin }}"
