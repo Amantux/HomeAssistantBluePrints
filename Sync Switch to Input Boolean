@@ -1,0 +1,47 @@
+blueprint:
+  name: Sync Switch to Input Boolean
+  description: >
+    Keeps a switch (e.g., Adaptive Lighting sleep mode) synced to an input_boolean.
+    When the boolean turns ON, the switch turns ON. When the boolean turns OFF, the switch turns OFF.
+  domain: automation
+
+  input:
+    source_boolean:
+      name: Source input_boolean
+      description: The input_boolean to mirror (e.g., input_boolean.bed_mode)
+      selector:
+        entity:
+          domain: input_boolean
+
+    target_switch:
+      name: Target switch
+      description: The switch to keep in sync (e.g., switch.adaptive_lighting_sleep_mode_fullpower_lights)
+      selector:
+        entity:
+          domain: switch
+
+mode: single
+
+trigger:
+  - platform: state
+    entity_id: !input source_boolean
+
+action:
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: !input source_boolean
+            state: "on"
+        sequence:
+          - service: switch.turn_on
+            target:
+              entity_id: !input target_switch
+
+      - conditions:
+          - condition: state
+            entity_id: !input source_boolean
+            state: "off"
+        sequence:
+          - service: switch.turn_off
+            target:
+              entity_id: !input target_switch
