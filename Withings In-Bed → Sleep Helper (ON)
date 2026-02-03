@@ -1,49 +1,60 @@
 blueprint:
-  name: Withings In-Bed → Sleep Helper (ON after delay + time gate)
+  name: Withings In-Bed → Sleep Helper (ON after duration + optional time gate)
   description: >
-    Turns an input_boolean ON only after the in-bed sensor has been ON
-    continuously for a configurable duration, optionally restricted to a
-    selectable time window.
+    Turns an input_boolean ON only after the in-bed sensor has been ON continuously
+    for a configurable duration. Optionally restricts triggering to a selectable
+    time window (supports windows that cross midnight).
   domain: automation
 
   input:
     in_bed_sensor:
       name: In-bed binary sensor
+      description: Binary sensor that is ON when in bed (e.g., binary_sensor.withings_in_bed)
       selector:
         entity:
           domain: binary_sensor
 
     sleep_helper:
-      name: Sleep helper
+      name: Sleep helper (input_boolean)
+      description: Helper to turn ON (e.g., input_boolean.sleep_time)
       selector:
         entity:
           domain: input_boolean
 
     in_bed_duration:
       name: Required in-bed duration
+      description: How long the in-bed sensor must remain ON before triggering
       default: "00:05:00"
       selector:
         duration: {}
 
     use_time_gate:
       name: Enable time-of-day gate
+      description: If enabled, only triggers within the window below
       default: true
       selector:
         boolean: {}
 
     gate_start:
       name: Gate start time
+      description: Start of allowed window (e.g., 21:00:00)
       default: "21:00:00"
       selector:
         time: {}
 
     gate_end:
       name: Gate end time
+      description: End of allowed window (e.g., 11:00:00)
       default: "11:00:00"
       selector:
         time: {}
 
 mode: single
+
+variables:
+  use_gate: !input use_time_gate
+  start_time: !input gate_start
+  end_time: !input gate_end
 
 trigger:
   - platform: state
@@ -51,25 +62,20 @@ trigger:
     to: "on"
     for: !input in_bed_duration
 
-action:
+condition:
   - choose:
-      # Gate disabled -> always run
+      # If gate is disabled, allow always
       - conditions:
           - condition: template
-            value_template: "{{ not use_time_gate }}"
-        sequence:
-          - service: input_boolean.turn_on
-            target:
-              entity_id: !input sleep_helper
+            value_template: "{{ not use_gate }}"
+        sequence: []
+    default:
+      # Gate enabled -> require current time inside the window
+      - condition: time
+        after: !input gate_start
+        before: !input gate_end
 
-      # Gate enabled -> run only inside time window
-      - conditions:
-          - condition: template
-            value_template: "{{ use_time_gate }}"
-          - condition: time
-            after: !input gate_start
-            before: !input gate_end
-        sequence:
-          - service: input_boolean.turn_on
-            target:
-              entity_id: !input sleep_helper
+action:
+  - service: input_boolean.turn_on
+    target:
+      entity_id: !input sleep_helper
