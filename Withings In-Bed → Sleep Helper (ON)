@@ -53,8 +53,6 @@ mode: single
 
 variables:
   use_gate: !input use_time_gate
-  start_time: !input gate_start
-  end_time: !input gate_end
 
 trigger:
   - platform: state
@@ -62,20 +60,25 @@ trigger:
     to: "on"
     for: !input in_bed_duration
 
-condition:
+action:
   - choose:
-      # If gate is disabled, allow always
+      # Gate disabled -> always run
       - conditions:
           - condition: template
             value_template: "{{ not use_gate }}"
-        sequence: []
-    default:
-      # Gate enabled -> require current time inside the window
-      - condition: time
-        after: !input gate_start
-        before: !input gate_end
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input sleep_helper
 
-action:
-  - service: input_boolean.turn_on
-    target:
-      entity_id: !input sleep_helper
+      # Gate enabled -> only run within time window
+      - conditions:
+          - condition: template
+            value_template: "{{ use_gate }}"
+          - condition: time
+            after: !input gate_start
+            before: !input gate_end
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input sleep_helper
