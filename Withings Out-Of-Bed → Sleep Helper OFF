@@ -1,0 +1,92 @@
+blueprint:
+  name: Withings Out-Of-Bed → Sleep Helper OFF (after delay + optional time gate)
+  description: >
+    Turns an input_boolean OFF only after the in-bed sensor has been OFF continuously
+    for a configurable duration. Optionally restricts triggering to a selectable
+    time window (supports windows that cross midnight).
+  domain: automation
+
+  input:
+    in_bed_sensor:
+      name: In-bed binary sensor
+      description: Binary sensor that is ON when in bed (e.g., binary_sensor.withings_in_bed)
+      selector:
+        entity:
+          domain: binary_sensor
+
+    sleep_helper:
+      name: Sleep helper (input_boolean)
+      description: Helper to turn OFF (e.g., input_boolean.sleep_time)
+      selector:
+        entity:
+          domain: input_boolean
+
+    out_of_bed_duration:
+      name: Required out-of-bed duration
+      description: How long the in-bed sensor must remain OFF before turning the helper OFF
+      default: "00:10:00"
+      selector:
+        duration: {}
+
+    use_time_gate:
+      name: Enable time-of-day gate
+      description: If enabled, only turns OFF within the window below
+      default: true
+      selector:
+        boolean: {}
+
+    gate_start:
+      name: Gate start time
+      description: Start of allowed window (e.g., 04:00:00)
+      default: "04:00:00"
+      selector:
+        time: {}
+
+    gate_end:
+      name: Gate end time
+      description: End of allowed window (e.g., 13:00:00)
+      default: "13:00:00"
+      selector:
+        time: {}
+
+mode: single
+
+variables:
+  use_gate: !input use_time_gate
+
+trigger:
+  - platform: state
+    entity_id: !input in_bed_sensor
+    to: "off"
+    for: !input out_of_bed_duration
+
+action:
+  - choose:
+      # Gate disabled -> always run
+      - conditions:
+          - condition: template
+            value_template: "{{ not use_gate }}"
+        sequence:
+          # Safety check: still out of bed
+          - condition: state
+            entity_id: !input in_bed_sensor
+            state: "off"
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input sleep_helper
+
+      # Gate enabled -> only run within time window
+      - conditions:
+          - condition: template
+            value_template: "{{ use_gate }}"
+          - condition: time
+            after: !input gate_start
+            before: !input gate_end
+        sequence:
+          # Safety check: still out of bed
+          - condition: state
+            entity_id: !input in_bed_sensor
+            state: "off"
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input sleep_helper
