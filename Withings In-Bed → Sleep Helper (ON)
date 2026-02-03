@@ -1,23 +1,47 @@
 blueprint:
-  name: Withings In-Bed → Sleep Helper (ON)
+  name: Withings In-Bed → Sleep Helper (ON after delay + time gate)
   description: >
-    Turns an input_boolean ON when a Withings in-bed binary sensor becomes ON.
+    Turns an input_boolean ON only after the in-bed sensor has been ON
+    continuously for a configurable duration, optionally restricted to a
+    selectable time window.
   domain: automation
 
   input:
     in_bed_sensor:
       name: In-bed binary sensor
-      description: Binary sensor that turns ON when in bed
       selector:
         entity:
           domain: binary_sensor
 
     sleep_helper:
       name: Sleep helper
-      description: Input boolean to turn ON when in bed
       selector:
         entity:
           domain: input_boolean
+
+    in_bed_duration:
+      name: Required in-bed duration
+      default: "00:05:00"
+      selector:
+        duration: {}
+
+    use_time_gate:
+      name: Enable time-of-day gate
+      default: true
+      selector:
+        boolean: {}
+
+    gate_start:
+      name: Gate start time
+      default: "21:00:00"
+      selector:
+        time: {}
+
+    gate_end:
+      name: Gate end time
+      default: "11:00:00"
+      selector:
+        time: {}
 
 mode: single
 
@@ -25,8 +49,27 @@ trigger:
   - platform: state
     entity_id: !input in_bed_sensor
     to: "on"
+    for: !input in_bed_duration
 
 action:
-  - service: input_boolean.turn_on
-    target:
-      entity_id: !input sleep_helper
+  - choose:
+      # Gate disabled -> always run
+      - conditions:
+          - condition: template
+            value_template: "{{ not use_time_gate }}"
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input sleep_helper
+
+      # Gate enabled -> run only inside time window
+      - conditions:
+          - condition: template
+            value_template: "{{ use_time_gate }}"
+          - condition: time
+            after: !input gate_start
+            before: !input gate_end
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input sleep_helper
