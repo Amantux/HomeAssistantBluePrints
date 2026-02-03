@@ -1,0 +1,32 @@
+blueprint:
+  name: Withings In-Bed → Sleep Helper (ON)
+  description: >
+    Turns an input_boolean ON when a Withings in-bed binary sensor becomes ON.
+  domain: automation
+
+  input:
+    in_bed_sensor:
+      name: In-bed binary sensor
+      description: Binary sensor that turns ON when in bed
+      selector:
+        entity:
+          domain: binary_sensor
+
+    sleep_helper:
+      name: Sleep helper
+      description: Input boolean to turn ON when in bed
+      selector:
+        entity:
+          domain: input_boolean
+
+mode: single
+
+trigger:
+  - platform: state
+    entity_id: !input in_bed_sensor
+    to: "on"
+
+action:
+  - service: input_boolean.turn_on
+    target:
+      entity_id: !input sleep_helper
